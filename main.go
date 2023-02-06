@@ -4,7 +4,8 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-	"image/color"
+	"image"
+	"image/draw"
 	"image/gif"
 	"net"
 	"os"
@@ -49,11 +50,11 @@ func main() {
 	}
 
 	// // Define the desired size
-	newWidth := 16
+	newWidth := 32
 	newHeight := 0
 
-	x_offset := 120
-	y_offset := 120
+	x_offset := 64
+	y_offset := 16
 
 	// var canvas [][]color.Color = make([][]color.Color, gifimg.Config.Width)
 	// for i := range canvas {
@@ -62,41 +63,49 @@ func main() {
 	// 		canvas[i][j] = color.Black
 	// 	}
 	// }
-	canvas := gifimg.Image[0]
 
 	fmt.Fprintln(os.Stderr, "preperation finished, sending pings..")
 	for {
+		canvas := image.NewRGBA(image.Rect(0, 0, gifimg.Config.Width, gifimg.Config.Height))
+		draw.Draw(canvas, canvas.Bounds(), gifimg.Image[0], image.ZP, draw.Src)
+
 		for i := range gifimg.Image {
 			start := time.Now()
 
 			img := gifimg.Image[i]
 			delay := gifimg.Delay[i]
 
-			bounds := img.Bounds()
-			for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
-				for x := bounds.Min.X; x < bounds.Max.X; x++ {
-					r1, g1, b1, _ := canvas.At(x, y).RGBA()
+			draw.Draw(canvas, canvas.Bounds(), img, image.ZP, draw.Over)
+			/*
+				bounds := img.Bounds()
+				for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+					for x := bounds.Min.X; x < bounds.Max.X; x++ {
+						r1, g1, b1, _ := canvas.At(x, y).RGBA()
 
-					colorr := img.At(x, y)
-					r2, g2, b2, a2 := colorr.RGBA()
-					a := float64(a2) / 65535
-					r := uint16(float64(r2)*float64(a) + float64(r1)*(float64(1)-a))
-					g := uint16(float64(g2)*float64(a) + float64(g1)*(float64(1)-a))
-					b := uint16(float64(b2)*float64(a) + float64(b1)*(float64(1)-a))
+						colorr := img.At(x, y)
+						r2, g2, b2, a2 := colorr.RGBA()
+						a := float64(a2) / 65535
+						r := uint16(float64(r2)*float64(a) + float64(r1)*(float64(1)-a))
+						g := uint16(float64(g2)*float64(a) + float64(g1)*(float64(1)-a))
+						b := uint16(float64(b2)*float64(a) + float64(b1)*(float64(1)-a))
 
-					canvas.Set(x, y, color.RGBA64{
-						R: r,
-						G: g,
-						B: b,
-						A: 65535,
-					})
-				}
-			}
+						canvas.Set(x, y, color.RGBA64{
+							R: r,
+							G: g,
+							B: b,
+							A: 65535,
+						})
+					}
+				}*/
+
+			// f, _ := os.Create(fmt.Sprintf("frame%d.png", i))
+			// png.Encode(f, canvas)
+			// f.Close()
 
 			// print canvas
 			fmt.Fprintln(os.Stderr, "scaling image..")
 			scaledImg := resize.Resize(uint(newWidth), uint(newHeight), canvas, resize.Lanczos3)
-			bounds = scaledImg.Bounds()
+			bounds := scaledImg.Bounds()
 			for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
 				for x := bounds.Min.X; x < bounds.Max.X; x++ {
 					r, g, b, _ := scaledImg.At(x, y).RGBA()
@@ -124,7 +133,7 @@ func main() {
 			fmt.Fprintln(os.Stderr, "sent whole image in %s", elapsed)
 
 			time.Sleep(time.Second / 100 * time.Duration(delay))
-			time.Sleep(time.Second / 2)
+			time.Sleep(time.Second / 4)
 		}
 	}
 	conn.Close()
