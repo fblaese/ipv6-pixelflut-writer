@@ -4,7 +4,8 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-	"image/png"
+	"image/color"
+	"image/gif"
 	"net"
 	"os"
 	"time"
@@ -16,7 +17,7 @@ func main() {
 	fmt.Fprintln(os.Stderr, "loading image..")
 
 	// Open the original image file
-	file, err := os.Open("input.png")
+	file, err := os.Open("input.gif")
 	if err != nil {
 		panic(err)
 	}
@@ -24,22 +25,12 @@ func main() {
 
 	fmt.Fprintln(os.Stderr, "decoding image..")
 	// Decode the image
-	img, err := png.Decode(file)
+	gifimg, err := gif.DecodeAll(file)
 	if err != nil {
 		panic(err)
 	}
 
-	// // Define the desired size
-	newWidth := 256
-	newHeight := 0
-
-	x_offset := 0
-	y_offset := 0
-
-	fmt.Fprintln(os.Stderr, "scaling image..")
-	// // Scale the image to the desired size
-	scaledImg := resize.Resize(uint(newWidth), uint(newHeight), img, resize.Lanczos3)
-
+	fmt.Fprintln(os.Stderr, "socket setup..")
 	packetByteBuffer := new(bytes.Buffer)
 	binary.Write(packetByteBuffer, binary.BigEndian, uint8(128)) // type
 	binary.Write(packetByteBuffer, binary.BigEndian, uint8(0))   // code
@@ -57,28 +48,84 @@ func main() {
 		panic(err)
 	}
 
-	fmt.Fprintln(os.Stderr, "preperation finished, sending pings..")
-	bounds := scaledImg.Bounds()
-	for {
-		start := time.Now()
-		for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
-			for x := bounds.Min.X; x < bounds.Max.X; x++ {
-				color := scaledImg.At(x, y)
-				r, g, b, a := color.RGBA()
-				addr := fmt.Sprintf("2400:8902:e001:233:%02x%02x:%02x:%02x:%02x", x_offset+x, y_offset+y, a*r/65536, a*g/65536, a*b/65536)
-				dst, _ := net.ResolveIPAddr("ip6", addr)
+	// // Define the desired size
+	newWidth := 16
+	newHeight := 0
 
-				for {
-					_, err := conn.WriteToIP(packetBytes, dst)
-					if err == nil {
-						break
+	x_offset := 120
+	y_offset := 120
+
+	// var canvas [][]color.Color = make([][]color.Color, gifimg.Config.Width)
+	// for i := range canvas {
+	// 	canvas[i] = make([]color.Color, gifimg.Config.Height)
+	// 	for j := range canvas[i] {
+	// 		canvas[i][j] = color.Black
+	// 	}
+	// }
+	canvas := gifimg.Image[0]
+
+	fmt.Fprintln(os.Stderr, "preperation finished, sending pings..")
+	for {
+		for i := range gifimg.Image {
+			start := time.Now()
+
+			img := gifimg.Image[i]
+			delay := gifimg.Delay[i]
+
+			bounds := img.Bounds()
+			for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+				for x := bounds.Min.X; x < bounds.Max.X; x++ {
+					r1, g1, b1, _ := canvas.At(x, y).RGBA()
+
+					colorr := img.At(x, y)
+					r2, g2, b2, a2 := colorr.RGBA()
+					a := float64(a2) / 65535
+					r := uint16(float64(r2)*float64(a) + float64(r1)*(float64(1)-a))
+					g := uint16(float64(g2)*float64(a) + float64(g1)*(float64(1)-a))
+					b := uint16(float64(b2)*float64(a) + float64(b1)*(float64(1)-a))
+
+					canvas.Set(x, y, color.RGBA64{
+						R: r,
+						G: g,
+						B: b,
+						A: 65535,
+					})
+				}
+			}
+
+			// print canvas
+			fmt.Fprintln(os.Stderr, "scaling image..")
+			scaledImg := resize.Resize(uint(newWidth), uint(newHeight), canvas, resize.Lanczos3)
+			bounds = scaledImg.Bounds()
+			for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+				for x := bounds.Min.X; x < bounds.Max.X; x++ {
+					r, g, b, _ := scaledImg.At(x, y).RGBA()
+
+					r = r / 256
+					g = g / 256
+					b = b / 256
+
+					//fmt.Printf("r: %d, g: %d, b: %d\n", r, g, b)
+
+					addr := fmt.Sprintf("2400:8902:e001:233:%02x%02x:%02x:%02x:%02x", x_offset+x, y_offset+y, r, g, b)
+					dst, _ := net.ResolveIPAddr("ip6", addr)
+
+					for {
+						_, err := conn.WriteToIP(packetBytes, dst)
+						if err == nil {
+							break
+						}
 					}
 				}
 			}
+
+			// wait
+			elapsed := time.Since(start)
+			fmt.Fprintln(os.Stderr, "sent whole image in %s", elapsed)
+
+			time.Sleep(time.Second / 100 * time.Duration(delay))
+			time.Sleep(time.Second / 2)
 		}
-		elapsed := time.Since(start)
-		fmt.Fprintln(os.Stderr, "sent whole image in %s", elapsed)
-		time.Sleep(1 * time.Second)
 	}
 	conn.Close()
 }
