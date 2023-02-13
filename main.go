@@ -4,12 +4,32 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"image"
+	"image/draw"
+	"image/gif"
 	"net"
 	"os"
 	"time"
+
+	"github.com/nfnt/resize"
 )
 
 func main() {
+	fmt.Fprintln(os.Stderr, "loading image..")
+
+	// Open the original image file
+	file, err := os.Open("input.gif")
+	if err != nil {
+		panic(err)
+	}
+	defer file.Close()
+
+	fmt.Fprintln(os.Stderr, "decoding image..")
+	// Decode the image
+	gifimg, err := gif.DecodeAll(file)
+	if err != nil {
+		panic(err)
+	}
 
 	fmt.Fprintln(os.Stderr, "socket setup..")
 	packetByteBuffer := new(bytes.Buffer)
@@ -21,7 +41,7 @@ func main() {
 	packetBytes := packetByteBuffer.Bytes()
 	_ = packetBytes
 
-	local, _ := net.ResolveIPAddr("ip6", "2a02:810d:ab40:2500:b6af:a0fc:c84b:4ea2")
+	local, _ := net.ResolveIPAddr("ip6", "2a0b:f4c0:c8:6d:39c:10d3:7afc:c352")
 	remote, _ := net.ResolveIPAddr("ip6", "2400:8902:e001:233:32::")
 	_ = remote
 	conn, err := net.ListenIP("ip6:ipv6-icmp", local)
@@ -29,10 +49,33 @@ func main() {
 		panic(err)
 	}
 
+	// // Define the desired size
+	newWidth := 32
+	newHeight := 0
+
+	x_offset := 64
+	y_offset := 16
+
+	// var canvas [][]color.Color = make([][]color.Color, gifimg.Config.Width)
+	// for i := range canvas {
+	// 	canvas[i] = make([]color.Color, gifimg.Config.Height)
+	// 	for j := range canvas[i] {
+	// 		canvas[i][j] = color.Black
+	// 	}
+	// }
+
 	fmt.Fprintln(os.Stderr, "preperation finished, sending pings..")
 	for {
-		for i := 0; i < 256; {
+		canvas := image.NewRGBA(image.Rect(0, 0, gifimg.Config.Width, gifimg.Config.Height))
+		draw.Draw(canvas, canvas.Bounds(), gifimg.Image[0], image.ZP, draw.Src)
+
+		for i := range gifimg.Image {
 			start := time.Now()
+
+			img := gifimg.Image[i]
+			delay := gifimg.Delay[i]
+
+			draw.Draw(canvas, canvas.Bounds(), img, image.ZP, draw.Over)
 			/*
 				bounds := img.Bounds()
 				for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
@@ -61,13 +104,19 @@ func main() {
 
 			// print canvas
 			fmt.Fprintln(os.Stderr, "scaling image..")
-			for y := 28; y < 64; y++ {
-				for x := 128; x < 160; x++ {
-					r := 0
-					g := uint32(0)
-					b := uint32(0)
+			scaledImg := resize.Resize(uint(newWidth), uint(newHeight), canvas, resize.Lanczos3)
+			bounds := scaledImg.Bounds()
+			for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+				for x := bounds.Min.X; x < bounds.Max.X; x++ {
+					r, g, b, _ := scaledImg.At(x, y).RGBA()
 
-					addr := fmt.Sprintf("2400:8902:e001:233:%02x%02x:%02x:%02x:%02x", x, y, r, g, b)
+					r = r / 256
+					g = g / 256
+					b = b / 256
+
+					//fmt.Printf("r: %d, g: %d, b: %d\n", r, g, b)
+
+					addr := fmt.Sprintf("2400:8902:e001:233:%02x%02x:%02x:%02x:%02x", x_offset+x, y_offset+y, r, g, b)
 					dst, _ := net.ResolveIPAddr("ip6", addr)
 
 					for {
@@ -83,6 +132,7 @@ func main() {
 			elapsed := time.Since(start)
 			fmt.Fprintln(os.Stderr, "sent whole image in %s", elapsed)
 
+			time.Sleep(time.Second / 100 * time.Duration(delay))
 			time.Sleep(time.Second / 4)
 		}
 	}
